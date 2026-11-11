@@ -6,6 +6,8 @@ wizard or the live panel.
 
 from __future__ import annotations
 
+import threading
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -20,6 +22,7 @@ from lumen.backends.registry import (  # noqa: E402
 )
 from lumen.engine.apply import ProfileApplier  # noqa: E402
 from lumen.engine.calibration import CalibrationSession  # noqa: E402
+from lumen.engine.controls import build_vcp_controls, warm_controls  # noqa: E402
 
 from .nightlight import NightLightOwnership  # noqa: E402
 from .panel import PanelWindow  # noqa: E402
@@ -35,6 +38,7 @@ class LumenApplication(Adw.Application):
             flags=Gio.ApplicationFlags.FLAGS_NONE,
         )
         self._applier: ProfileApplier | None = None
+        self._last_profile = None
 
     def do_activate(self) -> None:
         try:
@@ -47,6 +51,18 @@ class LumenApplication(Adw.Application):
             return
 
         self._applier = applier
+
+        # Reading every control over DDC/CI takes about a second, so it
+        # happens in the background while the wizard is already open.
+        threading.Thread(
+            target=warm_controls,
+            args=(
+                build_vcp_controls(
+                    applier.backend, applier.monitor, applier.capabilities
+                ),
+            ),
+            daemon=True,
+        ).start()
 
         # Night Light holds the same gamma ramp Lumen needs. Take
         # ownership of it for the lifetime of the application so the
@@ -62,8 +78,12 @@ class LumenApplication(Adw.Application):
             gamma_backend=applier.gamma_backend,
             gamma_output=applier.gamma_output,
         )
-        window = WizardWindow(self, session, applier)
+        window = WizardWindow(self, session, applier, on_finished=self._on_calibrated)
         window.present()
+
+    def _on_calibrated(self, profile) -> None:
+        """Called when the wizard finishes and saves a calibration."""
+        self._last_profile = profile
 
     def _build_applier(self) -> ProfileApplier:
         backend = make_ddc_backend()

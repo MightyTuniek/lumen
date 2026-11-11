@@ -52,6 +52,7 @@ class ProfileApplier:
         self._gamma_backend = gamma_backend
         self._gamma_output = gamma_output
         self._dangerous = self._dangerous_codes()
+        self._pending_snapshot: Snapshot | None = None
 
     # -- reading ------------------------------------------------------------
 
@@ -95,9 +96,22 @@ class ProfileApplier:
             if spec.safety is Safety.DANGEROUS
         }
 
-    def current_values(self) -> dict[int, int]:
-        """Every writable control's current value."""
-        values: dict[int, int] = {}
+    def current_values(self, controls=None) -> dict[int, int]:
+        """Every writable control's current value.
+
+        When controls are supplied their cached values are used, which
+        avoids a second trip over the bus for values already known.
+        """
+        if controls is not None:
+            values: dict[int, int] = {}
+            for control in controls:
+                value = control.peek()
+                code = getattr(control, "vcp_code", None)
+                if value is not None and code is not None:
+                    values[code] = int(value)
+            return values
+
+        values = {}
         for code in self._writable_codes():
             try:
                 reading = self._backend.get(self._monitor, code)
@@ -108,7 +122,13 @@ class ProfileApplier:
         return values
 
     def capture(self) -> Snapshot:
-        """Record the current state so it can be restored later."""
+        """Record the current state so it can be restored later.
+
+        This reads every writable control over the bus, which takes about
+        a second. It is called once when the wizard opens, so it is done
+        in the background; until it finishes the snapshot is empty and
+        cancelling restores what is known so far.
+        """
         gamma = None
         output = None
         if self._gamma_backend is not None and self._gamma_output is not None:
@@ -118,6 +138,46 @@ class ProfileApplier:
             except GammaError:
                 gamma = None
         return Snapshot(ddc=self.current_values(), gamma=gamma, output=output)
+
+    def snapshot_from(self, controls) -> Snapshot:
+        """Build a snapshot from controls that already know their values."""
+        return Snapshot(
+            ddc=self.current_values(controls),
+            gamma=self.capture_gamma(),
+            output=self._gamma_output,
+        )
+
+    def capture_gamma(self):
+        """The current gamma ramp, or None when there is no gamma backend."""
+        if self._gamma_backend is None or self._gamma_output is None:
+            return None
+        try:
+            return self._gamma_backend.read_ramp(self._gamma_output)
+        except GammaError:
+            return None
+
+    def capture_in_background(self, on_ready=None) -> None:
+        """Capture the state in the background, then call `on_ready`.
+
+        The wizard calls this instead of `capture`, so it opens at once
+        rather than pausing for a second on the bus.
+
+        `on_ready` is called from the worker thread. A caller that needs
+        to touch the interface must move the call onto the main thread
+        itself; the engine layer knows nothing about the interface.
+        """
+        import threading
+
+        def worker() -> None:
+            self._pending_snapshot = self.capture()
+            if on_ready is not None:
+                on_ready()
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def take_snapshot(self) -> Snapshot | None:
+        """The snapshot from the last background capture, if it is ready."""
+        return self._pending_snapshot
 
     # -- writing ------------------------------------------------------------
 

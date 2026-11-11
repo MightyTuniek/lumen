@@ -15,13 +15,18 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gtk  # noqa: E402
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from lumen.engine.apply import ProfileApplier  # noqa: E402
 from lumen.engine.calibration import CalibrationSession  # noqa: E402
-from lumen.model.profile import GammaCurve, new_profile  # noqa: E402
+from lumen.model.profile import GammaCurve, new_profile, save_profile  # noqa: E402
 
-from .widgets import ControlList, GroupHeader, PatternArea  # noqa: E402
+from .widgets import (  # noqa: E402
+    ControlList,
+    GroupHeader,
+    PatternArea,
+    read_controls,
+)
 
 
 class WizardWindow(Adw.ApplicationWindow):
@@ -39,8 +44,12 @@ class WizardWindow(Adw.ApplicationWindow):
         self._session = session
         self._applier = applier
         self._on_finished = on_finished
-        self._snapshot = applier.capture()
+        # The snapshot reads every control over the bus, which takes about
+        # a second. It is captured in the background so the wizard opens
+        # at once; cancelling before it finishes restores what is known.
+        self._snapshot = None
         self._dirty = False
+        self._sliders = []
 
         self._header = Adw.HeaderBar()
         self._header.set_title_widget(
@@ -94,6 +103,28 @@ class WizardWindow(Adw.ApplicationWindow):
         self.set_content(view)
         self._show_current_step()
 
+        # Reading every control over the bus takes about a second, so it
+        # happens once in the background. The values populate the
+        # controls' caches, which the sliders and the rollback snapshot
+        # then read from - rather than each making its own trip.
+        read_controls(self._session.controls, self._on_controls_ready)
+
+    def _on_controls_ready(self) -> None:
+        """Called once the controls have their values.
+
+        This arrives on a worker thread, so the work is moved onto the
+        main thread before anything is touched.
+        """
+        GLib.idle_add(self._on_controls_ready_main)
+
+    def _on_controls_ready_main(self) -> bool:
+        # The controls now know their values, so the rollback snapshot
+        # can be built from them without another trip over the bus.
+        self._snapshot = self._applier.snapshot_from(self._session.controls)
+        for slider in self._sliders:
+            slider.refresh()
+        return False
+
     # -- navigation ---------------------------------------------------------
 
     def _show_current_step(self) -> None:
@@ -116,11 +147,21 @@ class WizardWindow(Adw.ApplicationWindow):
         self._next_button.set_label("Finish" if last else "Next")
 
     def _rebuild_controls(self, step) -> None:
+        """Show the controls for a step.
+
+        The controls are built once and reused, because building them
+        means reading the monitor, and each DDC/CI read costs about fifty
+        milliseconds. Rebuilding them on every step made the wizard feel
+        sluggish.
+        """
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         controls = self._session.controls_for(step)
+        self._sliders = []
         if controls:
             box.append(GroupHeader("Controls"))
-            box.append(ControlList(controls, self._on_control_changed))
+            control_list = ControlList(controls, self._on_control_changed)
+            self._sliders = control_list.sliders
+            box.append(control_list)
         self._controls_box = box
         self._controls_scroll.set_child(box)
 
@@ -157,20 +198,31 @@ class WizardWindow(Adw.ApplicationWindow):
         self._show_current_step()
 
     def _on_cancel(self) -> None:
-        if self._dirty:
+        if self._dirty and self._snapshot is not None:
             self._applier.restore(self._snapshot)
         self.close()
 
     def _finish(self) -> None:
-        """Save the calibration and close."""
+        """Save the calibration and close.
+
+        The values are taken from the controls, which already know what
+        they are, rather than read from the bus again.
+        """
         monitor = self._applier.monitor
-        values = self._applier.current_values()
+        values = self._applier.current_values(self._session.controls)
         profile = new_profile(
             name="Calibration",
             monitor=monitor,
             ddc=values,
             gamma=GammaCurve(),
         )
+        # The profile is saved here rather than left to the caller, so
+        # the wizard always leaves a calibration behind.
+        try:
+            path = save_profile(profile)
+        except OSError as error:
+            self._report(error)
+            return
         if self._on_finished is not None:
             self._on_finished(profile)
         self.close()

@@ -232,6 +232,11 @@ class CalibrationSession:
         return list(self._steps)
 
     @property
+    def controls(self) -> list[Control]:
+        """Every control this monitor supports."""
+        return list(self._controls)
+
+    @property
     def current_step(self) -> CalibrationStep:
         if not self._steps:
             raise IndexError("this monitor has no calibration steps")

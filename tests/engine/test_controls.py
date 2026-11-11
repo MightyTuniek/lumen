@@ -58,6 +58,9 @@ def test_build_vcp_controls_uses_the_reported_maximum_not_the_registry_default()
     )
     controls = build_vcp_controls(backend, MONITOR, parse_capabilities("vcp(10)"))
     control = controls[0]
+    # The range is adopted when the value is first read, because reading
+    # the bus is what costs time and must not happen while drawing.
+    assert control.reported_maximum() == 50
     assert control.maximum == 50
     assert control.minimum == 0
 

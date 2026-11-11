@@ -40,10 +40,19 @@ def _first_byte(array, index: int) -> int:
 
 
 class DdcControlDBusBackend:
-    """Talks to `ddccontrol.DDCControl` over the system bus."""
+    """Talks to `ddccontrol.DDCControl` over the system bus.
 
-    def __init__(self, bus=None, service: str = SERVICE, path: str = PATH) -> None:
-        if bus is None:
+    The bus connection is shared between instances. The service
+    serialises its requests, so several connections competing for it
+    make every read slower - one shared connection is markedly faster.
+    """
+
+    _shared_bus = None
+
+    @classmethod
+    def _system_bus(cls):
+        """The shared system bus connection."""
+        if cls._shared_bus is None:
             try:
                 import dbus  # optional dependency, imported lazily
             except ImportError as exc:
@@ -51,7 +60,12 @@ class DdcControlDBusBackend:
                     "dbus-python is required for the ddccontrol backend; "
                     "install python3-dbus or use another backend"
                 ) from exc
-            bus = dbus.SystemBus()
+            cls._shared_bus = dbus.SystemBus()
+        return cls._shared_bus
+
+    def __init__(self, bus=None, service: str = SERVICE, path: str = PATH) -> None:
+        if bus is None:
+            bus = self._system_bus()
         self._bus = bus
         self._service = service
         self._path = path

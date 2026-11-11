@@ -66,24 +66,30 @@ class VcpControl:
         self.step = 1.0
         self.minimum = float(spec.minimum)
         self.maximum = float(spec.maximum)
-        self._refresh_range()
+        self._cached_value: float | None = None
 
     def _reading(self):
         return self._backend.get(self._monitor, self._spec.code)
 
-    def _refresh_range(self) -> None:
+    def _refresh_range(self, reading=None) -> None:
         """Adopt the monitor's own reported range for this control.
 
         The registry's range is the specification's default. A real panel
         may report a different maximum - brightness 50 on some panels -
         and a slider must reflect the hardware, not the default.
         """
-        try:
-            reading = self._reading()
-        except DdcError:
-            return
+        if reading is None:
+            try:
+                reading = self._reading()
+            except DdcError:
+                return
         if reading.supported and reading.maximum > 0:
             self.maximum = float(reading.maximum)
+
+    @property
+    def vcp_code(self) -> int | None:
+        """The VCP code this control drives, if it drives one."""
+        return self._spec.code
 
     def available(self) -> bool:
         try:
@@ -92,12 +98,46 @@ class VcpControl:
             return False
 
     def read(self) -> float:
+        """The current value.
+
+        The value is cached, because each DDC/CI read costs about fifty
+        milliseconds over the bus. A slider that read on every redraw
+        would make the interface feel slow, and the monitor does not
+        change its own values behind our back.
+
+        The first read also adopts the monitor's own reported range,
+        which may differ from the registry's default.
+        """
+        if self._cached_value is not None:
+            return self._cached_value
         reading = self._reading()
         if not reading.supported:
             raise DdcError(f"the monitor does not support 0x{self._spec.code:02X}")
-        if reading.maximum > 0:
-            self.maximum = float(reading.maximum)
-        return float(reading.value)
+        self._refresh_range(reading)
+        self._cached_value = float(reading.value)
+        return self._cached_value
+
+    def reported_maximum(self) -> float:
+        """The maximum the monitor itself reports for this control.
+
+        This reads the bus if the value is not known yet, so it is not
+        suitable for drawing. Use `peek` and the cached `maximum` when
+        redrawing.
+        """
+        self.read()
+        return self.maximum
+
+    def invalidate(self) -> None:
+        """Forget the cached value, so the next read goes to the monitor."""
+        self._cached_value = None
+
+    def peek(self) -> float | None:
+        """The cached value, or None when it is not known yet.
+
+        Unlike `read`, this never touches the bus, so it is safe to call
+        while drawing.
+        """
+        return self._cached_value
 
     def write(self, value: float) -> None:
         target = int(round(value))
@@ -107,6 +147,7 @@ class VcpControl:
                 f"{int(self.maximum)}, not {target}"
             )
         self._backend.set(self._monitor, self._spec.code, target)
+        self._cached_value = float(target)
 
 
 class PresetControl:
@@ -130,6 +171,7 @@ class PresetControl:
         self.step = 1.0
         self.minimum = float(min(options)) if options else 0.0
         self.maximum = float(max(options)) if options else 0.0
+        self._cached_value: float | None = None
 
     def available(self) -> bool:
         try:
@@ -138,10 +180,22 @@ class PresetControl:
             return False
 
     def read(self) -> float:
+        """The current value, cached between changes."""
+        if self._cached_value is not None:
+            return self._cached_value
         reading = self._backend.get(self._monitor, self._spec.code)
         if not reading.supported:
             raise DdcError(f"the monitor does not support 0x{self._spec.code:02X}")
-        return float(reading.value)
+        self._cached_value = float(reading.value)
+        return self._cached_value
+
+    def invalidate(self) -> None:
+        """Forget the cached value, so the next read goes to the monitor."""
+        self._cached_value = None
+
+    def peek(self) -> float | None:
+        """The cached value, or None when it is not known yet."""
+        return self._cached_value
 
     def write(self, value: float) -> None:
         target = int(round(value))
@@ -151,6 +205,7 @@ class PresetControl:
                 f"{self.label} must be one of {allowed}, not 0x{target:02X}"
             )
         self._backend.set(self._monitor, self._spec.code, target)
+        self._cached_value = float(target)
 
 
 class GammaControl:
@@ -255,3 +310,28 @@ def build_vcp_controls(
         else:
             controls.append(VcpControl(backend, monitor, spec))
     return controls
+
+
+def warm_controls(controls: list[Control], on_ready=None) -> None:
+    """Read every control once, in the background.
+
+    Each DDC/CI read costs about fifty milliseconds over the bus, so
+    reading two dozen controls on the main thread would stall the
+    interface for a second. Reading them in the background means the
+    wizard opens instantly and the values arrive a moment later.
+
+    `on_ready` is called on the main thread once every control has been
+    tried, so the interface can refresh itself.
+    """
+    import threading
+
+    def worker() -> None:
+        for control in controls:
+            try:
+                control.read()
+            except Exception:
+                continue
+        if on_ready is not None:
+            on_ready()
+
+    threading.Thread(target=worker, daemon=True).start()

@@ -5093,3 +5093,54 @@ Expected: PASS
 cd ~/lumen && git add README.md LICENSE docs pyproject.toml
 git commit -m "docs: README, architecture note and MIT licence"
 ```
+
+---
+
+## Implementation record
+
+The plan above covers the portable core. The guided interface and the
+login service were built as well, and are recorded here so the plan
+matches the repository.
+
+### Task 15: The GTK4 interface
+
+**Files:** `lumen/ui/{app,wizard,panel,patterns,widgets,nightlight}.py`,
+`tests/ui/{test_patterns,test_widgets,test_nightlight}.py`
+
+The wizard window shows a test pattern and the controls for the current
+step; the live panel gives day-to-day control. The patterns are drawn
+with Cairo and tested headlessly by rendering them into an offscreen
+surface.
+
+Two defects found while building this, both worth recording:
+
+- **Refreshing a slider wrote to the monitor.** Setting a slider's value
+  emits `value-changed`, which the wizard treated as the user moving
+  the slider. Every redraw therefore wrote the value back over the bus:
+  425 milliseconds per control, one to five seconds per wizard step,
+  and the display changed without the user asking. The update is now
+  blocked while a slider is being refreshed, with a regression test.
+- **Reading a control costs about fifty milliseconds.** The values are
+  cached, read once in the background, and the rollback snapshot is
+  taken in the background too. The wizard now opens in about fifteen
+  milliseconds and each step takes one to four.
+
+### Task 16: The login service
+
+**Files:** `lumen/service/daemon.py`, `systemd/lumen-service.service`,
+`tests/service/test_daemon.py`
+
+The service applies the saved calibration at login and again after the
+display wakes, because the DDC settings live in the monitor and survive
+on their own while the software gamma ramp lives in the X server and
+does not. It watches DPMS rather than the kernel, because that is when
+the X server discards the ramp.
+
+### Task 17: Night light ownership
+
+**Files:** `lumen/ui/nightlight.py`, `tests/ui/test_nightlight.py`
+
+GNOME's Night Light holds the same gamma ramp the calibration needs.
+The application takes ownership of it while it runs and puts the
+schedule back on exit. The user asked for no night light, so the
+schedule is switched off rather than fought with.

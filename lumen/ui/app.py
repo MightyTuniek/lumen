@@ -21,6 +21,7 @@ from lumen.backends.registry import (  # noqa: E402
 from lumen.engine.apply import ProfileApplier  # noqa: E402
 from lumen.engine.calibration import CalibrationSession  # noqa: E402
 
+from .nightlight import NightLightOwnership  # noqa: E402
 from .panel import PanelWindow  # noqa: E402
 from .wizard import WizardWindow  # noqa: E402
 
@@ -46,6 +47,14 @@ class LumenApplication(Adw.Application):
             return
 
         self._applier = applier
+
+        # Night Light holds the same gamma ramp Lumen needs. Take
+        # ownership of it for the lifetime of the application so the
+        # calibration is not silently replaced.
+        self._night_light = NightLightOwnership()
+        if self._night_light.available and self._night_light.scheduled:
+            self._night_light.take_ownership()
+
         session = CalibrationSession(
             applier.backend,
             applier.monitor,
@@ -71,6 +80,12 @@ class LumenApplication(Adw.Application):
             outputs = gamma.list_outputs()
             output = outputs[0] if outputs else None
         return ProfileApplier(backend, monitor, capabilities, gamma, output)
+
+    def do_shutdown(self) -> None:
+        """Put the night light schedule back the way it was."""
+        if hasattr(self, "_night_light"):
+            self._night_light.release()
+        Adw.Application.do_shutdown(self)
 
     def _show_error(self, heading: str, body: str) -> None:
         dialog = Adw.AlertDialog(heading=heading, body=body)

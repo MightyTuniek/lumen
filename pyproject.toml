@@ -6,16 +6,37 @@ build-backend = "setuptools.build_meta"
 name = "lumen"
 version = "0.1.0"
 description = "Guided display calibration"
+readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
+authors = [{ name = "Lumen contributors" }]
+keywords = ["display", "monitor", "calibration", "ddc", "gamma"]
+classifiers = [
+    "Environment :: X11 Applications :: GTK",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Hardware",
+]
 dependencies = []
 
 [project.optional-dependencies]
 gui = ["PyGObject>=3.48"]
+x11 = ["python-xlib>=0.33"]
 dev = ["pytest>=8"]
+
+[project.scripts]
+lumen = "lumen.ui.app:main"
+lumenctl = "lumen.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/lumen-cal/lumen"
 
 [tool.setuptools.packages.find]
 include = ["lumen*"]
+
+[tool.setuptools.package-data]
+lumen = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

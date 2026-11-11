@@ -1,0 +1,17 @@
+[Unit]
+Description=Apply the saved Lumen calibration to the display
+Documentation=https://github.com/lumen-cal/lumen
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/lumenctl apply-default
+Restart=on-failure
+RestartSec=5
+# The service only reads and writes the user's own display settings.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=graphical-session.target

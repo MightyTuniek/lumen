@@ -55,6 +55,31 @@ class ProfileApplier:
 
     # -- reading ------------------------------------------------------------
 
+    @property
+    def monitor(self) -> MonitorDescriptor:
+        """The monitor this applier controls."""
+        return self._monitor
+
+    @property
+    def capabilities(self) -> Capabilities:
+        """What the monitor advertises."""
+        return self._capabilities
+
+    @property
+    def backend(self):
+        """The DDC backend in use."""
+        return self._backend
+
+    @property
+    def gamma_backend(self):
+        """The gamma backend in use, if any."""
+        return self._gamma_backend
+
+    @property
+    def gamma_output(self) -> str | None:
+        """The output whose gamma ramp is controlled, if any."""
+        return self._gamma_output
+
     def _writable_codes(self) -> list[int]:
         return [
             spec.code

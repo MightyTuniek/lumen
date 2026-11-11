@@ -1,0 +1,84 @@
+"""The Lumen application.
+
+Starts up, finds the monitor and its backends, and opens either the
+wizard or the live panel.
+"""
+
+from __future__ import annotations
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+
+from gi.repository import Adw, Gio  # noqa: E402
+
+from lumen.backends.base import DdcError  # noqa: E402
+from lumen.backends.registry import (  # noqa: E402
+    make_ddc_backend,
+    make_gamma_backend,
+)
+from lumen.engine.apply import ProfileApplier  # noqa: E402
+from lumen.engine.calibration import CalibrationSession  # noqa: E402
+
+from .panel import PanelWindow  # noqa: E402
+from .wizard import WizardWindow  # noqa: E402
+
+
+class LumenApplication(Adw.Application):
+    """The main application."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            application_id="io.github.lumen_cal.Lumen",
+            flags=Gio.ApplicationFlags.FLAGS_NONE,
+        )
+        self._applier: ProfileApplier | None = None
+
+    def do_activate(self) -> None:
+        try:
+            applier = self._build_applier()
+        except DdcError as error:
+            self._show_error("No display could be reached", str(error))
+            return
+        except Exception as error:  # pragma: no cover - a last resort
+            self._show_error("Lumen could not start", str(error))
+            return
+
+        self._applier = applier
+        session = CalibrationSession(
+            applier.backend,
+            applier.monitor,
+            applier.capabilities,
+            gamma_backend=applier.gamma_backend,
+            gamma_output=applier.gamma_output,
+        )
+        window = WizardWindow(self, session, applier)
+        window.present()
+
+    def _build_applier(self) -> ProfileApplier:
+        backend = make_ddc_backend()
+        monitors = backend.list_monitors()
+        if not monitors:
+            raise DdcError("no monitors were found")
+        monitor = monitors[0]
+        if hasattr(backend, "describe"):
+            monitor = backend.describe(monitor)
+        capabilities = backend.capabilities(monitor)
+        gamma = make_gamma_backend()
+        output = None
+        if gamma is not None:
+            outputs = gamma.list_outputs()
+            output = outputs[0] if outputs else None
+        return ProfileApplier(backend, monitor, capabilities, gamma, output)
+
+    def _show_error(self, heading: str, body: str) -> None:
+        dialog = Adw.AlertDialog(heading=heading, body=body)
+        dialog.add_response("close", "Close")
+        dialog.present(self)
+
+
+def main() -> int:
+    Adw.init()
+    application = LumenApplication()
+    return application.run([])

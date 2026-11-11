@@ -180,6 +180,16 @@ def _cmd_restore(args) -> int:
     return 0
 
 
+def _cmd_apply_default(_args) -> int:
+    """Apply the saved calibration. This is what the login service runs."""
+    from lumen.service.daemon import apply_active_profile
+
+    notes = apply_active_profile()
+    for note in notes:
+        print(note)
+    return 0
+
+
 def _cmd_doctor(_args) -> int:
     availability = detect_backends()
     print("DDC/CI backend:")
@@ -223,6 +233,10 @@ def build_parser() -> argparse.ArgumentParser:
     capture = sub.add_parser("capture", help="record the current display state")
     capture.add_argument("--output", default="", help="where to write the snapshot")
     capture.set_defaults(func=_cmd_capture)
+
+    sub.add_parser(
+        "apply-default", help="apply the saved calibration (used by the service)"
+    ).set_defaults(func=_cmd_apply_default)
 
     restore = sub.add_parser("restore", help="put a captured state back")
     restore.add_argument("path", help="the snapshot file")

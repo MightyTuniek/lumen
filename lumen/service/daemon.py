@@ -1,0 +1,124 @@
+"""The background service that applies a saved calibration.
+
+DDC/CI settings live in the monitor and survive sleep, reboot and even
+the X server restarting. The software gamma ramp lives in the X server
+and does not, so it has to be put back after every session starts and
+after the display wakes.
+
+The service therefore does two things:
+
+- applies the active profile when the session starts
+- re-applies it after the display is re-enabled
+
+It watches the display's DPMS state rather than the kernel's, because
+that is the moment the X server discards its gamma ramp.
+"""
+
+from __future__ import annotations
+
+import time
+
+from lumen.backends.registry import make_ddc_backend, make_gamma_backend
+from lumen.engine.apply import ProfileApplier
+from lumen.model.profile import load_profile, profile_directory
+
+
+def active_profile_path():
+    """The profile to apply, or None when the user has not saved one."""
+    directory = profile_directory()
+    if not directory.exists():
+        return None
+    profiles = sorted(directory.glob("*.json"))
+    if not profiles:
+        return None
+    return profiles[0]
+
+
+def build_applier() -> ProfileApplier:
+    """The applier for the first monitor the backends can reach."""
+    backend = make_ddc_backend()
+    monitors = backend.list_monitors()
+    if not monitors:
+        raise RuntimeError("no monitors were found")
+    monitor = monitors[0]
+    if hasattr(backend, "describe"):
+        monitor = backend.describe(monitor)
+    capabilities = backend.capabilities(monitor)
+    gamma = make_gamma_backend()
+    output = None
+    if gamma is not None:
+        outputs = gamma.list_outputs()
+        output = outputs[0] if outputs else None
+    return ProfileApplier(backend, monitor, capabilities, gamma, output)
+
+
+def apply_active_profile(applier: ProfileApplier | None = None) -> list[str]:
+    """Apply the saved profile, returning any notes."""
+    path = active_profile_path()
+    if path is None:
+        return ["no saved calibration to apply"]
+    applier = applier or build_applier()
+    profile = load_profile(path)
+    return applier.apply(profile)
+
+
+def watch_display_wake(applier: ProfileApplier, interval: float = 5.0) -> None:
+    """Re-apply the profile whenever the display is re-enabled.
+
+    The X server drops the gamma ramp when the display powers down, so
+    the ramp has to be written again on the way back up.
+    """
+    try:
+        from Xlib import display as xdisplay
+        from Xlib.ext import dpms
+    except ImportError:
+        return
+
+    try:
+        x_display = xdisplay.Display()
+    except Exception:
+        return
+
+    if not x_display.has_extension("DPMS"):
+        return
+
+    try:
+        state = dpms.get_state(x_display).state
+    except Exception:
+        return
+
+    was_on = state != dpms.DPMSStateOff
+    while True:
+        time.sleep(interval)
+        try:
+            current = dpms.get_state(x_display).state
+        except Exception:
+            continue
+        now_on = current != dpms.DPMSStateOff
+        if was_on and not now_on:
+            was_on = False
+            continue
+        if not was_on and now_on:
+            was_on = True
+            try:
+                apply_active_profile(applier)
+            except Exception:
+                pass
+
+
+def main() -> int:
+    """Run the service."""
+    try:
+        applier = build_applier()
+    except Exception:
+        return 1
+    apply_active_profile(applier)
+    try:
+        watch_display_wake(applier)
+    except KeyboardInterrupt:
+        return 0
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

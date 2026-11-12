@@ -310,7 +310,7 @@ def about_dialog(application) -> Adw.AboutWindow:
         application_icon="lumen",
         version="0.1.0",
         developer_name="Lumen contributors",
-        license_type=Gtk.License.GPL_3_0_ONLY,
+        license_type=Gtk.License.GPL_3_0,
         comments="Guided display calibration",
     )
     return about

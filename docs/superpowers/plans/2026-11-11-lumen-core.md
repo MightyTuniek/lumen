@@ -19,7 +19,7 @@
 - Every gamma write must be followed by an explicit flush and a read-back verification. (Spec §2.4.1 — the write is silently discarded otherwise.)
 - Controls are classified `safe`, `confirm` or `dangerous`. `dangerous` controls are never exposed by the normal UI path.
 - The VCP registry is authored from the public MCCS/DDC-CI specification. No GPL source (ddcutil) may be copied.
-- The project is GPL-3.0-only licensed.
+- The project is GPL-3.0-or-later licensed.
 - The application writes nothing outside the user's home directory (XDG config dir only).
 - Identifiers use lowercase_with_underscores. No abbreviations that are not in the MCCS specification.
 
@@ -186,7 +186,7 @@ name = "lumen"
 version = "0.1.0"
 description = "Guided display calibration"
 requires-python = ">=3.12"
-license = { text = "GPL-3.0-only" }
+license = { text = "GPL-3.0-or-later" }
 dependencies = []
 
 [project.optional-dependencies]
@@ -4938,14 +4938,14 @@ only and says so.
 
 ## Licence
 
-GPL version 3 only (`GPL-3.0-only`). See `LICENSE`.
+GPL version 3 or later (`GPL-3.0-or-later`). See `LICENSE`.
 ```
 
 - [ ] **Step 2: Write the licence**
 
 `LICENSE` must contain the complete, unmodified GNU General Public License,
 version 3, available from <https://www.gnu.org/licenses/gpl-3.0.txt>.
-Use `GPL-3.0-only` in project metadata and state version 3 only in the README.
+Use `GPL-3.0-or-later` in project metadata and state version 3 or later in the README.
 
 - [ ] **Step 3: Write the architecture note**
 
@@ -5026,7 +5026,7 @@ authors = [{ name = "Lumen contributors" }]
 keywords = ["display", "monitor", "calibration", "ddc", "gamma"]
 classifiers = [
     "Environment :: X11 Applications :: GTK",
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3.12",
     "Topic :: System :: Hardware",

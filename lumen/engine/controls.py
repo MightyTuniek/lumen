@@ -48,6 +48,9 @@ class Control(Protocol):
     def write(self, value: float) -> None:
         """Set the value. Raises on failure or an out-of-range value."""
 
+    def peek(self) -> float | None:
+        """The last known value, without accessing hardware."""
+
     def available(self) -> bool:
         """Whether the control can currently be read and written."""
 
@@ -226,6 +229,7 @@ class GammaControl:
         self._output = output
         self._channel = channel
         self._exponent = exponent
+        self._cached_value: float | None = None
         self.code = f"gamma_{channel}"
         self.label = f"Gamma {channel.capitalize()}"
         self.minimum = 1.0
@@ -265,9 +269,15 @@ class GammaControl:
         # taken upper-over-lower to keep them above one.
         output_ratio = upper_output / lower_output
         if output_ratio <= 1.0:
-            return 1.0
+            self._cached_value = 1.0
+            return self._cached_value
         exponent = math.log(upper_fraction / lower_fraction) / math.log(output_ratio)
-        return float(round(exponent, 3))
+        self._cached_value = float(round(exponent, 3))
+        return self._cached_value
+
+    def peek(self) -> float | None:
+        """The last known exponent, without reading the gamma ramp."""
+        return self._cached_value
 
     def write(self, value: float) -> None:
         if value < self.minimum or value > self.maximum:
@@ -288,6 +298,7 @@ class GammaControl:
             tuple(channels[1]),
             tuple(channels[2]),
         )
+        self._cached_value = value
 
 
 def build_vcp_controls(

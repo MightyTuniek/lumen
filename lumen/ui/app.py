@@ -6,8 +6,6 @@ wizard or the live panel.
 
 from __future__ import annotations
 
-import threading
-
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -22,7 +20,6 @@ from lumen.backends.registry import (  # noqa: E402
 )
 from lumen.engine.apply import ProfileApplier  # noqa: E402
 from lumen.engine.calibration import CalibrationSession  # noqa: E402
-from lumen.engine.controls import build_vcp_controls, warm_controls  # noqa: E402
 
 from .nightlight import NightLightOwnership  # noqa: E402
 from .panel import PanelWindow  # noqa: E402
@@ -41,6 +38,10 @@ class LumenApplication(Adw.Application):
         self._last_profile = None
 
     def do_activate(self) -> None:
+        window = self.get_active_window()
+        if window is not None:
+            window.present()
+            return
         try:
             applier = self._build_applier()
         except DdcError as error:
@@ -51,18 +52,6 @@ class LumenApplication(Adw.Application):
             return
 
         self._applier = applier
-
-        # Reading every control over DDC/CI takes about a second, so it
-        # happens in the background while the wizard is already open.
-        threading.Thread(
-            target=warm_controls,
-            args=(
-                build_vcp_controls(
-                    applier.backend, applier.monitor, applier.capabilities
-                ),
-            ),
-            daemon=True,
-        ).start()
 
         # Night Light holds the same gamma ramp Lumen needs. Take
         # ownership of it for the lifetime of the application so the
@@ -78,6 +67,12 @@ class LumenApplication(Adw.Application):
             gamma_backend=applier.gamma_backend,
             gamma_output=applier.gamma_output,
         )
+        if not session.steps:
+            self._show_error(
+                "No calibration controls are available",
+                "This display offers no supported calibration controls or software gamma.",
+            )
+            return
         window = WizardWindow(self, session, applier, on_finished=self._on_calibrated)
         window.present()
 
@@ -108,9 +103,14 @@ class LumenApplication(Adw.Application):
         Adw.Application.do_shutdown(self)
 
     def _show_error(self, heading: str, body: str) -> None:
+        window = Adw.ApplicationWindow(application=self, title="Lumen")
+        window.set_default_size(480, 240)
+        window.present()
         dialog = Adw.AlertDialog(heading=heading, body=body)
         dialog.add_response("close", "Close")
-        dialog.present(self)
+        dialog.set_close_response("close")
+        dialog.connect("response", lambda _dialog, _response: window.destroy())
+        dialog.present(window)
 
 
 def main() -> int:

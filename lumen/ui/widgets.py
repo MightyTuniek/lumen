@@ -6,6 +6,7 @@ panel can use them without importing each other.
 
 from __future__ import annotations
 
+import math
 import threading
 
 import gi
@@ -45,7 +46,8 @@ def _ensure_worker():
                 return
             target, callback = item
             try:
-                target.read()
+                if target is not None:
+                    target.read()
             except Exception:
                 pass
             if callback is not None:
@@ -61,7 +63,7 @@ def read_controls(controls, on_done=None) -> None:
     for control in controls:
         worker.put((control, None))
     if on_done is not None:
-        GLib.idle_add(on_done)
+        worker.put((None, on_done))
 
 
 def _read_queue(control, on_done) -> None:
@@ -125,15 +127,29 @@ class ValueSlider(Gtk.Box):
         header.append(Gtk.Box(hexpand=True))
         header.append(self._value)
 
-        self._scale = Gtk.Scale.new_with_range(
-            Gtk.Orientation.HORIZONTAL, control.minimum, control.maximum, 1
-        )
-        self._scale.set_draw_value(False)
-        self._scale.set_hexpand(True)
-        self._scale.connect("value-changed", self._on_slider_changed)
-
         self.append(header)
-        self.append(self._scale)
+        if control.kind is ControlKind.PRESET:
+            options = getattr(control, "options", ())
+            self._preset = Gtk.DropDown.new_from_strings(
+                [f"0x{option:02X}" for option in options]
+            )
+            self._preset.connect("notify::selected", self._on_preset_changed)
+            self.append(self._preset)
+        else:
+            self._entry = Gtk.Entry()
+            self._entry.set_width_chars(7)
+            self._entry.set_max_width_chars(9)
+            self._entry.set_alignment(1.0)
+            self._entry.set_visible(False)
+            self._entry.connect("activate", self._on_entry_activated)
+            header.append(self._entry)
+            self._scale = Gtk.Scale.new_with_range(
+                Gtk.Orientation.HORIZONTAL, control.minimum, control.maximum, control.step
+            )
+            self._scale.set_draw_value(False)
+            self._scale.set_hexpand(True)
+            self._scale.connect("value-changed", self._on_slider_changed)
+            self.append(self._scale)
         self.refresh()
 
     def _request_value(self) -> None:
@@ -169,8 +185,46 @@ class ValueSlider(Gtk.Box):
         if self._control.kind is ControlKind.PRESET:
             return
         self._value.set_label(f"{value:g}")
+        self._entry.set_text(f"{value:g}")
+        self._entry.remove_css_class("error")
+        self._set_entry_hint()
         if self._on_change is not None:
             self._on_change(self._control, value)
+
+    def _on_entry_activated(self, entry) -> None:
+        """Apply a complete typed value only when the user presses Enter."""
+        control = self._control
+        try:
+            value = float(entry.get_text().strip())
+            if not math.isfinite(value) or not control.minimum <= value <= control.maximum:
+                raise ValueError
+            if control.kind is ControlKind.VCP and not value.is_integer():
+                raise ValueError
+        except ValueError:
+            entry.add_css_class("error")
+            kind = "a whole number" if control.kind is ControlKind.VCP else "a number"
+            entry.set_tooltip_text(
+                f"Enter {kind} between {control.minimum:g} and {control.maximum:g}."
+            )
+            return
+        entry.remove_css_class("error")
+        self._scale.set_value(value)
+        entry.set_text(f"{self._scale.get_value():g}")
+        self._set_entry_hint()
+
+    def _set_entry_hint(self) -> None:
+        self._entry.set_tooltip_text(
+            f"{self._control.label}: {self._control.minimum:g}–{self._control.maximum:g}. "
+            "Type a value and press Enter to apply."
+        )
+
+    def _on_preset_changed(self, dropdown, _param) -> None:
+        if self._updating:
+            return
+        options = getattr(self._control, "options", ())
+        selected = dropdown.get_selected()
+        if selected < len(options) and self._on_change is not None:
+            self._on_change(self._control, options[selected])
 
     def refresh(self) -> None:
         """Show the control's current value.
@@ -186,6 +240,9 @@ class ValueSlider(Gtk.Box):
             # background, rather than blocking the interface: each read
             # costs about fifty milliseconds over the bus.
             self._value.set_label("reading...")
+            self._value.set_visible(True)
+            if self._control.kind is not ControlKind.PRESET:
+                self._entry.set_visible(False)
             self.set_sensitive(False)
             if self._asked:
                 self._value.set_label("unavailable")
@@ -199,13 +256,23 @@ class ValueSlider(Gtk.Box):
             options = getattr(self._control, "options", ())
             allowed = ", ".join(f"0x{option:02X}" for option in options)
             self._value.set_label(f"0x{int(value):02X}  ({allowed})")
+            self._updating = True
+            self._preset.set_selected(
+                options.index(int(value)) if int(value) in options else Gtk.INVALID_LIST_POSITION
+            )
+            self._updating = False
         else:
-            self._value.set_label(f"{value:g}")
+            self._value.set_visible(False)
+            self._entry.set_visible(True)
+            self._entry.set_text(f"{value:g}")
+            self._entry.remove_css_class("error")
+            self._set_entry_hint()
             # Setting the slider's value emits "value-changed", which
             # would write straight back to the monitor. The update is
             # blocked while the slider is being refreshed, so showing a
             # value never changes the display.
             self._updating = True
+            self._scale.set_range(self._control.minimum, self._control.maximum)
             self._scale.set_value(value)
             self._updating = False
 

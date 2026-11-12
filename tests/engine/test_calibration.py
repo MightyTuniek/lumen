@@ -190,3 +190,13 @@ def test_every_step_carries_an_instruction_for_the_user():
     for step in steps_for(FULL):
         assert step.instruction.strip()
         assert step.title.strip()
+
+
+def test_gamma_step_exposes_adjustable_channels():
+    from lumen.engine.controls import ControlKind
+
+    session = make_session(gamma_backend=FakeGammaBackend(), gamma_output="fake-0")
+    step = next(step for step in session.steps if step.key == "gamma_curve")
+    controls = session.controls_for(step)
+    assert {control.code for control in controls} == {"gamma_red", "gamma_green", "gamma_blue"}
+    assert all(control.kind is ControlKind.GAMMA for control in controls)

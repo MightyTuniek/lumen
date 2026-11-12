@@ -31,9 +31,7 @@ class PanelWindow(Adw.ApplicationWindow):
 
         self._header = Adw.HeaderBar()
         self._header.set_title_widget(Adw.WindowTitle(title="Lumen"))
-        self.set_content(self._header)
-
-        self._toast = Adw.Toast()
+        self._toast = None
 
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         body.set_margin_top(12)
@@ -59,7 +57,12 @@ class PanelWindow(Adw.ApplicationWindow):
         scroll = Gtk.ScrolledWindow()
         scroll.set_child(body)
         scroll.set_vexpand(True)
-        self.set_content(scroll)
+        view = Adw.ToolbarView()
+        view.add_top_bar(self._header)
+        view.set_content(scroll)
+        self._overlay = Adw.ToastOverlay()
+        self._overlay.set_child(view)
+        self.set_content(self._overlay)
 
         self._build_controls()
 
@@ -83,22 +86,22 @@ class PanelWindow(Adw.ApplicationWindow):
         try:
             control.write(value)
         except Exception as error:
-            self._toast.set_title(str(error))
-            self._header.add_toast(self._toast)
+            self._notify(str(error))
 
-    def _on_apply_profile(self) -> None:
+    def _notify(self, message: str) -> None:
+        self._toast = Adw.Toast(title=message)
+        self._overlay.add_toast(self._toast)
+
+    def _on_apply_profile(self, _button) -> None:
         directory = profile_directory()
         paths = sorted(directory.glob("*.json")) if directory.exists() else []
         if not paths:
-            self._toast.set_title("No saved calibrations yet")
-            self._header.add_toast(self._toast)
+            self._notify("No saved calibrations yet")
             return
         profile = load_profile(paths[0])
         notes = self._applier.apply(profile)
         message = "; ".join(notes) if notes else f"Applied {profile.name}"
-        self._toast.set_title(message)
-        self._header.add_toast(self._toast)
+        self._notify(message)
 
-    def _on_restore(self) -> None:
-        self._toast.set_title("No snapshot to restore")
-        self._header.add_toast(self._toast)
+    def _on_restore(self, _button) -> None:
+        self._notify("No snapshot to restore")

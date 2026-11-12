@@ -19,8 +19,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from lumen.engine.controls import Control, build_vcp_controls
+from lumen.engine.controls import Control, ControlKind, GammaControl, build_vcp_controls
 from lumen.model.monitor import Capabilities, MonitorDescriptor
+from lumen.model.profile import GammaCurve
 
 BRIGHTNESS = 0x10
 CONTRAST = 0x12
@@ -193,6 +194,7 @@ def steps_with_gamma(capabilities: Capabilities) -> list[CalibrationStep]:
             "cannot do."
         ),
         pattern=Pattern.GREYSCALE_RAMP,
+        control_codes=("gamma_red", "gamma_green", "gamma_blue"),
     )
     result: list[CalibrationStep] = []
     for step in steps:
@@ -224,6 +226,10 @@ class CalibrationSession:
         self._index = 0
         if gamma_backend is not None and gamma_output is not None:
             self._steps = steps_with_gamma(capabilities)
+            self._controls.extend(
+                GammaControl(gamma_backend, gamma_output, channel)
+                for channel in ("red", "green", "blue")
+            )
         else:
             self._steps = steps_for(capabilities)
 
@@ -235,6 +241,21 @@ class CalibrationSession:
     def controls(self) -> list[Control]:
         """Every control this monitor supports."""
         return list(self._controls)
+
+    @property
+    def gamma_curve(self) -> GammaCurve:
+        """The gamma exponents currently shown by the controls."""
+        values = {
+            control.code: control.peek()
+            for control in self._controls
+            if control.kind is ControlKind.GAMMA
+        }
+        return GammaCurve(
+            exponent=1.0,
+            red_exponent=values.get("gamma_red"),
+            green_exponent=values.get("gamma_green"),
+            blue_exponent=values.get("gamma_blue"),
+        )
 
     @property
     def current_step(self) -> CalibrationStep:

@@ -15,11 +15,11 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gtk  # noqa: E402
 
 from lumen.engine.apply import ProfileApplier  # noqa: E402
 from lumen.engine.calibration import CalibrationSession  # noqa: E402
-from lumen.model.profile import GammaCurve, new_profile, save_profile  # noqa: E402
+from lumen.model.profile import new_profile, save_profile  # noqa: E402
 
 from .widgets import (  # noqa: E402
     ControlList,
@@ -44,11 +44,12 @@ class WizardWindow(Adw.ApplicationWindow):
         self._session = session
         self._applier = applier
         self._on_finished = on_finished
-        # The snapshot reads every control over the bus, which takes about
-        # a second. It is captured in the background so the wizard opens
-        # at once; cancelling before it finishes restores what is known.
+        # Keep adjustments disabled until the original values are captured.
         self._snapshot = None
         self._dirty = False
+        self._completed = False
+        self._closed = False
+        self.connect("close-request", self._on_close_request)
         self._sliders = []
 
         self._header = Adw.HeaderBar()
@@ -102,6 +103,8 @@ class WizardWindow(Adw.ApplicationWindow):
         view.set_content(content)
         self.set_content(view)
         self._show_current_step()
+        self._controls_scroll.set_sensitive(False)
+        self._next_button.set_sensitive(False)
 
         # Reading every control over the bus takes about a second, so it
         # happens once in the background. The values populate the
@@ -110,19 +113,19 @@ class WizardWindow(Adw.ApplicationWindow):
         read_controls(self._session.controls, self._on_controls_ready)
 
     def _on_controls_ready(self) -> None:
-        """Called once the controls have their values.
-
-        This arrives on a worker thread, so the work is moved onto the
-        main thread before anything is touched.
-        """
-        GLib.idle_add(self._on_controls_ready_main)
+        """Called on the main thread once all queued reads have finished."""
+        self._on_controls_ready_main()
 
     def _on_controls_ready_main(self) -> bool:
+        if self._closed:
+            return False
         # The controls now know their values, so the rollback snapshot
         # can be built from them without another trip over the bus.
         self._snapshot = self._applier.snapshot_from(self._session.controls)
         for slider in self._sliders:
             slider.refresh()
+        self._controls_scroll.set_sensitive(True)
+        self._next_button.set_sensitive(True)
         return False
 
     # -- navigation ---------------------------------------------------------
@@ -142,7 +145,7 @@ class WizardWindow(Adw.ApplicationWindow):
 
         self._rebuild_controls(step)
 
-        self._back_button.set_sensitive(self._session.current_step is not None)
+        self._back_button.set_sensitive(step is not self._session.steps[0])
         last = self._session.current_step is self._session.steps[-1]
         self._next_button.set_label("Finish" if last else "Next")
 
@@ -183,7 +186,9 @@ class WizardWindow(Adw.ApplicationWindow):
 
     # -- actions ------------------------------------------------------------
 
-    def _on_next(self) -> None:
+    def _on_next(self, _button) -> None:
+        if self._snapshot is None:
+            return
         if self._session.finished:
             self._finish()
             return
@@ -193,14 +198,18 @@ class WizardWindow(Adw.ApplicationWindow):
             return
         self._show_current_step()
 
-    def _on_back(self) -> None:
+    def _on_back(self, _button) -> None:
         self._session.back()
         self._show_current_step()
 
-    def _on_cancel(self) -> None:
-        if self._dirty and self._snapshot is not None:
-            self._applier.restore(self._snapshot)
+    def _on_cancel(self, _button) -> None:
         self.close()
+
+    def _on_close_request(self, _window) -> bool:
+        if not self._completed and self._dirty and self._snapshot is not None:
+            self._applier.restore(self._snapshot)
+        self._closed = True
+        return False
 
     def _finish(self) -> None:
         """Save the calibration and close.
@@ -214,7 +223,7 @@ class WizardWindow(Adw.ApplicationWindow):
             name="Calibration",
             monitor=monitor,
             ddc=values,
-            gamma=GammaCurve(),
+            gamma=self._session.gamma_curve,
         )
         # The profile is saved here rather than left to the caller, so
         # the wizard always leaves a calibration behind.
@@ -223,6 +232,7 @@ class WizardWindow(Adw.ApplicationWindow):
         except OSError as error:
             self._report(error)
             return
+        self._completed = True
         if self._on_finished is not None:
             self._on_finished(profile)
         self.close()

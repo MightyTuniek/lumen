@@ -11,3 +11,14 @@ venv/
 .coverage
 htmlcov/
 *.icc
+
+# Local agent instructions, credentials and machine configuration.
+AGENTS.md
+CLAUDE.md
+/.agents/
+/.codex/
+/.aws/
+.env
+.env.*
+!.env.example
+.DS_Store

@@ -1,6 +1,6 @@
 [Unit]
 Description=Apply the saved Lumen calibration to the display
-Documentation=https://github.com/lumen-cal/lumen
+Documentation=https://github.com/MightyTuniek/lumen
 PartOf=graphical-session.target
 After=graphical-session.target
 

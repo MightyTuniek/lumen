@@ -31,7 +31,7 @@ lumenctl = "lumen.cli:main"
 lumen-service = "lumen.service.daemon:main"
 
 [project.urls]
-Homepage = "https://github.com/lumen-cal/lumen"
+Homepage = "https://github.com/MightyTuniek/lumen"
 
 [tool.setuptools.packages.find]
 include = ["lumen*"]

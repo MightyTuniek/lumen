@@ -20,18 +20,13 @@ import time
 
 from lumen.backends.registry import make_ddc_backend, make_gamma_backend
 from lumen.engine.apply import ProfileApplier
-from lumen.model.profile import load_profile, profile_directory
+from lumen.model.profile import load_profile
+from lumen.model.settings import load_settings, selected_profile_path
 
 
 def active_profile_path():
     """The profile to apply, or None when the user has not saved one."""
-    directory = profile_directory()
-    if not directory.exists():
-        return None
-    profiles = sorted(directory.glob("*.json"))
-    if not profiles:
-        return None
-    return profiles[0]
+    return selected_profile_path()
 
 
 def build_applier() -> ProfileApplier:
@@ -100,10 +95,11 @@ def watch_display_wake(applier: ProfileApplier, interval: float = 5.0) -> None:
             continue
         if not was_on and now_on:
             was_on = True
-            try:
-                apply_active_profile(applier)
-            except Exception:
-                pass
+            if load_settings().reapply_on_wake:
+                try:
+                    apply_active_profile(applier)
+                except Exception:
+                    pass
 
 
 def main() -> int:
@@ -112,7 +108,8 @@ def main() -> int:
         applier = build_applier()
     except Exception:
         return 1
-    apply_active_profile(applier)
+    if load_settings().apply_at_login:
+        apply_active_profile(applier)
     try:
         watch_display_wake(applier)
     except KeyboardInterrupt:

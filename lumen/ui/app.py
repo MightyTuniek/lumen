@@ -20,9 +20,11 @@ from lumen.backends.registry import (  # noqa: E402
 )
 from lumen.engine.apply import ProfileApplier  # noqa: E402
 from lumen.engine.calibration import CalibrationSession  # noqa: E402
+from lumen.model.settings import Settings, load_settings  # noqa: E402
 
 from .nightlight import NightLightOwnership  # noqa: E402
 from .panel import PanelWindow  # noqa: E402
+from .settings import SettingsWindow, settings_button  # noqa: E402
 from .wizard import WizardWindow  # noqa: E402
 
 
@@ -36,8 +38,37 @@ class LumenApplication(Adw.Application):
         )
         self._applier: ProfileApplier | None = None
         self._last_profile = None
+        self._settings_window = None
+        self._settings = load_settings()
+        action = Gio.SimpleAction.new("settings", None)
+        action.connect("activate", self._show_settings)
+        self.add_action(action)
+        self.set_accels_for_action("app.settings", ["<primary>comma"])
+
+    def _apply_preferences(self, settings: Settings) -> None:
+        self._settings = settings
+        scheme = {
+            "system": Adw.ColorScheme.DEFAULT,
+            "light": Adw.ColorScheme.FORCE_LIGHT,
+            "dark": Adw.ColorScheme.FORCE_DARK,
+        }[settings.appearance]
+        self.get_style_manager().set_color_scheme(scheme)
+
+    def _show_settings(self, _action=None, _parameter=None) -> None:
+        if self._settings_window is None:
+            self._settings_window = SettingsWindow(
+                self, parent=self.get_active_window(), applier=self._applier,
+                on_changed=self._apply_preferences,
+            )
+            self._settings_window.connect("close-request", self._settings_closed)
+        self._settings_window.present()
+
+    def _settings_closed(self, _window) -> bool:
+        self._settings_window = None
+        return False
 
     def do_activate(self) -> None:
+        self._apply_preferences(load_settings())
         window = self.get_active_window()
         if window is not None:
             window.present()
@@ -57,8 +88,13 @@ class LumenApplication(Adw.Application):
         # ownership of it for the lifetime of the application so the
         # calibration is not silently replaced.
         self._night_light = NightLightOwnership()
-        if self._night_light.available and self._night_light.scheduled:
+        if (self._settings.manage_night_light and self._night_light.available
+                and self._night_light.scheduled):
             self._night_light.take_ownership()
+
+        if self._settings.opening_screen == "panel":
+            PanelWindow(self, applier).present()
+            return
 
         session = CalibrationSession(
             applier.backend,
@@ -105,11 +141,20 @@ class LumenApplication(Adw.Application):
     def _show_error(self, heading: str, body: str) -> None:
         window = Adw.ApplicationWindow(application=self, title="Lumen")
         window.set_default_size(480, 240)
+        header = Adw.HeaderBar()
+        header.pack_end(settings_button())
+        view = Adw.ToolbarView()
+        view.add_top_bar(header)
+        view.set_content(Adw.StatusPage(title=heading, description=body,
+                                        icon_name="video-display-symbolic"))
+        window.set_content(view)
         window.present()
         dialog = Adw.AlertDialog(heading=heading, body=body)
+        dialog.add_response("settings", "Settings")
         dialog.add_response("close", "Close")
         dialog.set_close_response("close")
-        dialog.connect("response", lambda _dialog, _response: window.destroy())
+        dialog.connect("response", lambda _dialog, response:
+                       self._show_settings() if response == "settings" else window.destroy())
         dialog.present(window)
 
 

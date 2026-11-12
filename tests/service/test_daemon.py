@@ -44,3 +44,66 @@ def test_applying_the_profile_sets_the_values(tmp_path, monkeypatch):
     applier, backend = make_applier()
     apply_active_profile(applier)
     assert backend.get(MONITOR, 0x10).value == 77
+
+
+def test_service_applies_selected_profile(tmp_path, monkeypatch):
+    from lumen.model.settings import Settings, save_settings
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    save_profile(new_profile("Day", MONITOR, ddc={0x10: 25}))
+    save_profile(new_profile("Evening", MONITOR, ddc={0x10: 65}))
+    save_settings(Settings(default_profile="evening.json"))
+    applier, backend = make_applier()
+    apply_active_profile(applier)
+    assert backend.get(MONITOR, 0x10).value == 65
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_service_start_respects_login_preference(tmp_path, monkeypatch, enabled):
+    from lumen.model.settings import Settings, save_settings
+    from lumen.service import daemon
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    save_settings(Settings(apply_at_login=enabled))
+    applier, _ = make_applier()
+    applied = []
+    monkeypatch.setattr(daemon, "build_applier", lambda: applier)
+    monkeypatch.setattr(daemon, "apply_active_profile", applied.append)
+    monkeypatch.setattr(daemon, "watch_display_wake", lambda *args: None)
+    assert daemon.main() == 0
+    assert applied == ([applier] if enabled else [])
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_wake_respects_current_preferences(tmp_path, monkeypatch, enabled):
+    import sys
+    from types import SimpleNamespace
+
+    from lumen.model.settings import Settings, save_settings
+    from lumen.service import daemon
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    save_settings(Settings(reapply_on_wake=not enabled))
+    states = iter([0, 1])
+    display = SimpleNamespace(has_extension=lambda extension: True)
+    dpms = SimpleNamespace(DPMSStateOff=0,
+                           get_state=lambda _: SimpleNamespace(state=next(states)))
+    monkeypatch.setitem(sys.modules, "Xlib", SimpleNamespace(
+        display=SimpleNamespace(Display=lambda: display)))
+    monkeypatch.setitem(sys.modules, "Xlib.ext", SimpleNamespace(dpms=dpms))
+    applied = []
+    monkeypatch.setattr(daemon, "apply_active_profile", applied.append)
+
+    def sleep(_interval):
+        # A running service must notice preferences changed after it started.
+        if sleep.called:
+            raise KeyboardInterrupt
+        sleep.called = True
+        save_settings(Settings(reapply_on_wake=enabled))
+
+    sleep.called = False
+    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    applier, _ = make_applier()
+    with pytest.raises(KeyboardInterrupt):
+        daemon.watch_display_wake(applier)
+    assert applied == ([applier] if enabled else [])

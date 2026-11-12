@@ -28,6 +28,7 @@ dev = ["pytest>=8"]
 [project.scripts]
 lumen = "lumen.ui.app:main"
 lumenctl = "lumen.cli:main"
+lumen-service = "lumen.service.daemon:main"
 
 [project.urls]
 Homepage = "https://github.com/lumen-cal/lumen"

@@ -16,8 +16,10 @@ from gi.repository import Adw, Gtk  # noqa: E402
 
 from lumen.engine.apply import ProfileApplier  # noqa: E402
 from lumen.engine.controls import build_vcp_controls  # noqa: E402
-from lumen.model.profile import load_profile, profile_directory  # noqa: E402
+from lumen.model.profile import load_profile  # noqa: E402
+from lumen.model.settings import load_settings, selected_profile_path  # noqa: E402
 
+from .settings import settings_button  # noqa: E402
 from .widgets import ControlList, GroupHeader  # noqa: E402
 
 
@@ -31,6 +33,7 @@ class PanelWindow(Adw.ApplicationWindow):
 
         self._header = Adw.HeaderBar()
         self._header.set_title_widget(Adw.WindowTitle(title="Lumen"))
+        self._header.pack_end(settings_button())
         self._toast = None
 
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -93,13 +96,17 @@ class PanelWindow(Adw.ApplicationWindow):
         self._overlay.add_toast(self._toast)
 
     def _on_apply_profile(self, _button) -> None:
-        directory = profile_directory()
-        paths = sorted(directory.glob("*.json")) if directory.exists() else []
-        if not paths:
-            self._notify("No saved calibrations yet")
+        path = selected_profile_path()
+        if path is None:
+            self._notify("The default profile is unavailable" if load_settings().default_profile
+                         else "No saved calibrations yet")
             return
-        profile = load_profile(paths[0])
-        notes = self._applier.apply(profile)
+        try:
+            profile = load_profile(path)
+            notes = self._applier.apply(profile)
+        except (OSError, ValueError, TypeError, AttributeError) as error:
+            self._notify(f"Could not apply profile: {error}")
+            return
         message = "; ".join(notes) if notes else f"Applied {profile.name}"
         self._notify(message)
 

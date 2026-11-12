@@ -12,6 +12,8 @@ on a system without dbus-python installed.
 from __future__ import annotations
 
 import time
+import hashlib
+from pathlib import Path
 
 from lumen.backends.base import DdcError
 from lumen.model.capability import parse_capabilities
@@ -20,6 +22,29 @@ from lumen.model.vcp_registry import spec_for
 
 SERVICE = "ddccontrol.DDCControl"
 PATH = "/ddccontrol/DDCControl"
+DRM_PATH = Path("/sys/class/drm")
+
+
+def _edid_for_device(identifier: str) -> str | None:
+    """Resolve a DDC bus to its DRM EDID without guessing display order."""
+    prefix = "dev:/dev/"
+    if not identifier.startswith(prefix):
+        return None
+    bus = identifier[len(prefix):]
+    if not bus.startswith("i2c-") or not bus[4:].isdigit():
+        return None
+    hashes = []
+    for connector in DRM_PATH.glob("card*-*"):
+        try:
+            if (connector / "ddc").resolve(strict=True).name != bus:
+                continue
+            edid = (connector / "edid").read_bytes()
+        except OSError:
+            continue
+        if len(edid) >= 128:
+            hashes.append(hashlib.md5(edid).hexdigest())
+    # A shared bus is not enough to identify a physical display safely.
+    return hashes[0] if len(hashes) == 1 else None
 
 # How many times to retry a write the monitor did not accept.
 _WRITE_RETRIES = 3
@@ -100,6 +125,7 @@ class DdcControlDBusBackend:
                     model=str(name),
                     connection="digital" if is_digital else "analog",
                     backend_name="ddccontrol",
+                    edid_hash=_edid_for_device(str(device)),
                 )
             )
         return monitors

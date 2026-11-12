@@ -117,3 +117,48 @@ def test_set_rejects_a_value_above_the_reported_maximum():
     monitor = backend.list_monitors()[0]
     with pytest.raises(DdcError):
         backend.set(monitor, 0x10, 500)
+
+
+def test_drm_bus_identity_restores_hardware_calibration_steps(tmp_path, monkeypatch):
+    import hashlib
+    from lumen.backends.ddc import ddccontrol_dbus
+    from lumen.backends.displays import discover_displays
+    from lumen.backends.fakes import FakeGammaBackend
+    from lumen.engine.calibration import CalibrationSession
+    from lumen.model.monitor import MonitorDescriptor
+
+    connector = tmp_path / 'card0-DP-1'
+    connector.mkdir()
+    bus = tmp_path / 'i2c-4'
+    bus.mkdir()
+    (connector / 'ddc').symlink_to(bus, target_is_directory=True)
+    edid = bytes(range(128))
+    (connector / 'edid').write_bytes(edid)
+    monkeypatch.setattr(ddccontrol_dbus, 'DRM_PATH', tmp_path, raising=False)
+    backend, _ = make_backend()
+    gamma = FakeGammaBackend(outputs=('DP-1',))
+    gamma.describe_outputs = lambda: [MonitorDescriptor(
+        'output:DP-1', connection='DP-1', edid_hash=hashlib.md5(edid).hexdigest())]
+
+    choices, unpaired = discover_displays(backend, gamma)
+    session = CalibrationSession(choices[0].backend, choices[0].monitor,
+                                 choices[0].capabilities, gamma, 'DP-1')
+    assert 'baseline' in [step.key for step in session.steps]
+    assert 'gamma_curve' in [step.key for step in session.steps]
+    assert unpaired == []
+
+
+@pytest.mark.parametrize('case', ['missing', 'short', 'ambiguous', 'other_bus'])
+def test_drm_identity_does_not_guess(tmp_path, monkeypatch, case):
+    from lumen.backends.ddc import ddccontrol_dbus
+
+    monkeypatch.setattr(ddccontrol_dbus, 'DRM_PATH', tmp_path)
+    bus = tmp_path / ('i2c-5' if case == 'other_bus' else 'i2c-4')
+    bus.mkdir()
+    for name in (('card0-DP-1', 'card0-DP-2') if case == 'ambiguous' else ('card0-DP-1',)):
+        connector = tmp_path / name
+        connector.mkdir()
+        (connector / 'ddc').symlink_to(bus, target_is_directory=True)
+        if case != 'missing':
+            (connector / 'edid').write_bytes(b'x' * (10 if case == 'short' else 128))
+    assert ddccontrol_dbus._edid_for_device('dev:/dev/i2c-4') is None

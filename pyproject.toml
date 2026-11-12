@@ -24,6 +24,7 @@ dependencies = []
 gui = ["PyGObject>=3.48"]
 x11 = ["python-xlib>=0.33"]
 dev = ["pytest>=8"]
+colorimeter = ["dbus-python>=1.3"]
 
 [project.scripts]
 lumen = "lumen.ui.app:main"

@@ -11,11 +11,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .monitor import MonitorDescriptor
+from .colorimeter import DisplayTarget, SampledCurves
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,10 @@ class Profile:
     ddc: dict[int, int] = field(default_factory=dict)
     gamma: GammaCurve = field(default_factory=GammaCurve)
     notes: str = ""
+    measured_curves: SampledCurves | None = None
+    display_target: DisplayTarget | None = None
+    calibration: dict | None = None
+    icc_path: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -87,6 +93,10 @@ class Profile:
             "ddc": {f"{code:02X}": value for code, value in sorted(self.ddc.items())},
             "gamma": self.gamma.to_dict(),
             "notes": self.notes,
+            "measured_curves": self.measured_curves.to_dict() if self.measured_curves else None,
+            "display_target": self.display_target.to_dict() if self.display_target else None,
+            "calibration": self.calibration,
+            "icc_path": self.icc_path,
         }
 
     @classmethod
@@ -113,6 +123,12 @@ class Profile:
             ddc=ddc,
             gamma=GammaCurve.from_dict(data.get("gamma", {})),
             notes=data.get("notes", ""),
+            measured_curves=(SampledCurves.from_dict(data["measured_curves"])
+                             if data.get("measured_curves") else None),
+            display_target=(DisplayTarget(**data["display_target"])
+                            if data.get("display_target") else None),
+            calibration=data.get("calibration"),
+            icc_path=data.get("icc_path"),
         )
 
 
@@ -150,7 +166,18 @@ def save_profile(profile: Profile, directory: Path | None = None) -> Path:
     target_dir = Path(directory) if directory is not None else profile_directory()
     target_dir.mkdir(parents=True, exist_ok=True)
     path = target_dir / f"{profile_slug(profile.name)}.json"
-    path.write_text(json.dumps(profile.to_dict(), indent=2) + "\n", encoding="utf-8")
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=target_dir,
+                                         delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(json.dumps(profile.to_dict(), indent=2) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return path
 
 

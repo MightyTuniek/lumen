@@ -125,3 +125,13 @@ def test_write_with_a_mismatched_ramp_length_raises():
 def test_missing_display_raises_gamma_unavailable():
     with pytest.raises(GammaUnavailable):
         XRandRGammaBackend(display_name="/nonexistent-display")
+
+
+def test_write_verifies_green_and_blue_not_only_red():
+    backend, xr = make_backend()
+    red = xr.ramp
+    green = tuple(min(65535, value + 100) for value in red)
+    # FakeXRandr only stores red and returns it for every channel. A backend
+    # checking only red would incorrectly report this green write as accepted.
+    with pytest.raises(GammaError):
+        backend.write_ramp('HDMI-A-0', red, green, red)

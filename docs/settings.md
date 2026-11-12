@@ -38,3 +38,13 @@ wake preference on each DPMS wake. The systemd unit runs the persistent
 
 These need additional behaviour and are not represented by inactive
 preferences in the current settings window.
+
+## Colorimeter
+
+The Colorimeter page stores instrument identity, instrument display-type
+option, optional local correction file, white/luminance/tone-response
+targets, profiling detail, automatic DDC adjustment, and preferred ICC
+activation. Defaults are D65, 120 cd/m², gamma 2.2, Quick mode, automatic
+DDC, and activation highlighted after review. Per-run overrides do not
+rewrite preferences. The Check action explicitly probes tools and devices;
+opening Settings does not. See [Colorimeter calibration](colorimeter.md).

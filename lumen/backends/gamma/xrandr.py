@@ -76,7 +76,8 @@ class XRandRGammaBackend:
                 continue
             if not info.crtc:
                 continue
-            mapping[info.name] = info.crtc
+            name = info.name.decode() if isinstance(info.name, bytes) else info.name
+            mapping[name] = info.crtc
 
         self._crtcs = mapping
 
@@ -92,6 +93,105 @@ class XRandRGammaBackend:
     def list_outputs(self) -> list[str]:
         self._refresh_crtcs()
         return sorted(self._crtcs)
+
+    def describe_outputs(self):
+        """Connected outputs with EDID identity (colord-compatible MD5)."""
+        import hashlib
+        from lumen.model.monitor import MonitorDescriptor
+
+        root = self._display.screen().root
+        resources = self._randr.get_screen_resources(root)
+        atom = self._display.intern_atom("EDID")
+        result = []
+        for output in resources.outputs:
+            info = self._display.xrandr_get_output_info(output, 0)
+            if not info.crtc:
+                continue
+            name = info.name.decode() if isinstance(info.name, bytes) else info.name
+            edid = b""
+            try:
+                reply = self._display.xrandr_get_output_property(output, atom, 0, 0, 256, False, False)
+                edid = bytes(reply.value)
+            except Exception:
+                pass
+            model, serial = name, ""
+            if len(edid) >= 128:
+                for offset in range(54, 126, 18):
+                    block = edid[offset:offset + 18]
+                    if block[:3] == b"\x00\x00\x00":
+                        text = block[5:18].decode("ascii", "replace").strip()
+                        if block[3] == 0xFC:
+                            model = text
+                        elif block[3] == 0xFF:
+                            serial = text
+            result.append(MonitorDescriptor(identifier=f"output:{name}", model=model,
+                          serial=serial, edid_hash=hashlib.md5(edid).hexdigest() if edid else None,
+                          connection=name, backend_name="xrandr"))
+        return result
+
+    def capture_icc(self, output: str):
+        """Capture output and primary-root properties before activation."""
+        from Xlib import Xatom
+        root = self._display.screen().root
+        resources = self._randr.get_screen_resources(root)
+        atom = self._display.intern_atom("_ICC_PROFILE")
+        for output_id in resources.outputs:
+            info = self._display.xrandr_get_output_info(output_id, 0)
+            name = info.name.decode() if isinstance(info.name, bytes) else info.name
+            if name == output:
+                value = self._display.xrandr_get_output_property(output_id, atom, Xatom.CARDINAL,
+                                                                 0, 4 * 1024 * 1024, False, False)
+                prop = root.get_full_property(atom, Xatom.CARDINAL)
+                return {"output": bytes(value.value) if value.property_type else None,
+                        "root": bytes(prop.value) if prop else None}
+        raise GammaError(f"Output {output!r} disconnected")
+
+    def restore_icc(self, output: str, snapshot):
+        self.publish_icc(output, snapshot["output"])
+        from Xlib import Xatom
+        root = self._display.screen().root
+        atom = self._display.intern_atom("_ICC_PROFILE")
+        if snapshot["root"] is None:
+            root.delete_property(atom)
+        else:
+            root.change_property(atom, Xatom.CARDINAL, 8, snapshot["root"])
+        self._display.flush()
+        self._display.sync()
+
+    def validate_output(self, output: str):
+        self._refresh_crtcs()
+        crtc = self._crtc_for(output)
+        if list(self._crtcs.values()).count(crtc) != 1:
+            raise GammaError("Mirrored outputs share a gamma ramp; disable mirroring before calibration")
+
+    def publish_icc(self, output: str, data: bytes | None):
+        """Publish the per-output ICC atom and the primary root fallback."""
+        from Xlib import Xatom
+
+        root = self._display.screen().root
+        resources = self._randr.get_screen_resources(root)
+        atom = self._display.intern_atom("_ICC_PROFILE")
+        found = None
+        for output_id in resources.outputs:
+            info = self._display.xrandr_get_output_info(output_id, 0)
+            name = info.name.decode() if isinstance(info.name, bytes) else info.name
+            if name == output:
+                found = output_id
+                break
+        if found is None:
+            raise GammaError(f"Output {output!r} disconnected")
+        if data is None:
+            self._display.xrandr_delete_output_property(found, atom)
+        else:
+            self._display.xrandr_change_output_property(found, atom, Xatom.CARDINAL, 0, (8, list(data)))
+        primary = root.xrandr_get_output_primary().output
+        if found == primary or len(self.list_outputs()) == 1:
+            if data is None:
+                root.delete_property(atom)
+            else:
+                root.change_property(atom, Xatom.CARDINAL, 8, data)
+        self._display.flush()
+        self._display.sync()
 
     def read_ramp(
         self, output: str
@@ -133,7 +233,7 @@ class XRandRGammaBackend:
         self._display.sync()
 
         observed = self.read_ramp(output)
-        if observed[0] != tuple(red):
+        if observed != (tuple(red), tuple(green), tuple(blue)):
             raise GammaError(
                 f"the gamma ramp for {output!r} did not take the written value"
             )

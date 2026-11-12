@@ -22,7 +22,8 @@ from lumen.engine.controls import build_vcp_controls
 from lumen.engine.curves import build_channel_ramps
 from lumen.model.capability import supported_specs
 from lumen.model.monitor import Capabilities, MonitorDescriptor
-from lumen.model.profile import Profile
+from lumen.model.profile import Profile, profile_matches_monitor
+from lumen.backends.locking import display_lock
 from lumen.model.vcp_registry import Safety
 
 
@@ -183,7 +184,23 @@ class ProfileApplier:
 
     def apply(self, profile: Profile) -> list[str]:
         """Apply a profile, returning notes about anything skipped."""
+        with display_lock(self._gamma_output, self._monitor.identifier), display_lock(None, self._monitor.identifier):
+            return self._apply_unlocked(profile)
+
+    def _apply_unlocked(self, profile: Profile) -> list[str]:
         notes: list[str] = []
+        if profile.measured_curves is not None:
+            target = profile.display_target
+            if target is None or not self._gamma_output:
+                return ["refused measured calibration: no identified gamma output"]
+            if target.edid_hash:
+                descriptors = (self._gamma_backend.describe_outputs()
+                               if hasattr(self._gamma_backend, "describe_outputs") else [self._monitor])
+                matches = [m for m in descriptors if m.edid_hash == target.edid_hash]
+                if len(matches) != 1 or matches[0].connection != self._gamma_output:
+                    return ["refused measured calibration: display identity is missing or ambiguous"]
+            elif target.output != self._gamma_output or not profile_matches_monitor(profile, self._monitor):
+                return ["refused measured calibration: display identity does not match"]
         supported = set(self._writable_codes())
 
         for code, value in sorted(profile.ddc.items()):
@@ -206,7 +223,8 @@ class ProfileApplier:
         if self._gamma_backend is not None and self._gamma_output is not None:
             size = self._ramp_size()
             if size:
-                red, green, blue = build_channel_ramps(size, profile.gamma)
+                red, green, blue = (profile.measured_curves.ramps(size) if profile.measured_curves
+                                    else build_channel_ramps(size, profile.gamma))
                 try:
                     self._gamma_backend.write_ramp(
                         self._gamma_output, red, green, blue
@@ -218,13 +236,21 @@ class ProfileApplier:
 
         return notes
 
-    def restore(self, snapshot: Snapshot) -> None:
+    def restore(self, snapshot: Snapshot) -> list[str]:
         """Put the display back the way the snapshot found it."""
+        with display_lock(self._gamma_output, self._monitor.identifier), display_lock(None, self._monitor.identifier):
+            return self._restore_unlocked(snapshot)
+
+    def _restore_unlocked(self, snapshot: Snapshot) -> list[str]:
+        failures = []
         for code, value in sorted(snapshot.ddc.items()):
+            if code not in self._writable_codes():
+                failures.append(f"refused restoration of unsupported or dangerous 0x{code:02X}")
+                continue
             try:
                 self._backend.set(self._monitor, code, value)
-            except DdcError:
-                continue
+            except DdcError as error:
+                failures.append(f"Could not restore 0x{code:02X}: {error}")
 
         if (
             snapshot.gamma is not None
@@ -233,8 +259,9 @@ class ProfileApplier:
         ):
             try:
                 self._gamma_backend.write_ramp(snapshot.output, *snapshot.gamma)
-            except GammaError:
-                pass
+            except GammaError as error:
+                failures.append(f"Could not restore gamma: {error}")
+        return failures
 
     def _ramp_size(self) -> int:
         if self._gamma_backend is None or self._gamma_output is None:

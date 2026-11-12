@@ -10,7 +10,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 from lumen.engine.apply import ProfileApplier  # noqa: E402
 from lumen.model.profile import load_profile, profile_directory  # noqa: E402
@@ -82,6 +82,48 @@ class SettingsWindow(Adw.PreferencesWindow):
         group.add(row)
         self._rows[key] = row
 
+    def _number(self, group, key, title, low, high, step=1, digits=0):
+        row = Adw.SpinRow(title=title, digits=digits, adjustment=Gtk.Adjustment(
+            value=getattr(self._settings, key), lower=low, upper=high,
+            step_increment=step, page_increment=step * 10))
+        row.connect("notify::value", lambda widget, _prop: self._change(key, widget.get_value()))
+        group.add(row)
+        self._rows[key] = row
+
+    def _text(self, group, key, title):
+        row = Adw.EntryRow(title=title, text=getattr(self._settings, key), show_apply_button=True)
+        row.connect("apply", lambda widget: self._change(key, widget.get_text().strip()))
+        group.add(row)
+        self._rows[key] = row
+
+    def _check_colorimeter(self, button):
+        import threading
+        button.set_sensitive(False)
+        def worker():
+            from lumen.backends.colorimeter.argyll import ArgyllBackend, availability
+            tools = availability()
+            message = tools.description
+            if tools.available:
+                try:
+                    instruments, _ = ArgyllBackend().discover([])
+                    message += "\n" + ("\n".join(f"{i.name} · identity: {i.identifier}" for i in instruments) or "No accessible instruments")
+                except Exception as error:
+                    message += "\n" + str(error)
+            try:
+                from lumen.backends.colorimeter.colord import ColordBackend
+                ColordBackend()
+                message += "\nICC activation: colord available"
+            except Exception as error:
+                message += "\nICC activation: " + str(error)
+            def show():
+                button.set_sensitive(True)
+                dialog = Adw.AlertDialog(heading="Colorimeter diagnostics", body=message)
+                dialog.add_response("close", "Close")
+                dialog.present(self)
+                return False
+            GLib.idle_add(show)
+        threading.Thread(target=worker, daemon=True).start()
+
     def _info(self, group: Adw.PreferencesGroup, title: str, value: str | int) -> None:
         row = Adw.ActionRow(title=title, subtitle=str(value))
         row.set_use_markup(False)
@@ -135,6 +177,30 @@ class SettingsWindow(Adw.PreferencesWindow):
         self._info(storage, "Saved profiles", profile_directory())
         self._info(storage, "Preferences file", settings_path())
 
+        colorimeter = self._page("Colorimeter", "color-select-symbolic")
+        equipment = self._group(colorimeter, "Instrument defaults",
+            "Optional ArgyllCMS tools provide instrument support. No hardware is probed until you choose Check or open Colorimeter.")
+        self._text(equipment, "colorimeter_instrument", "Preferred instrument identity")
+        self._text(equipment, "colorimeter_display_type", "Display technology option (from instrument)")
+        self._text(equipment, "colorimeter_correction", "Correction file (.ccss or .ccmx)")
+        check = Gtk.Button(label="Check instruments and dependencies", halign=Gtk.Align.START)
+        check.connect("clicked", self._check_colorimeter)
+        equipment.add(check)
+        target = self._group(colorimeter, "Default targets", "Each run can override these values.")
+        self._choice(target, "colorimeter_white_point", "White point",
+                     ["D65", "D50", "Native", "Custom daylight"], ["D65", "D50", "native", "custom"])
+        self._number(target, "colorimeter_temperature", "Custom temperature (K)", 4000, 10000, 100)
+        self._number(target, "colorimeter_luminance", "White luminance (cd/m²)", 50, 400)
+        self._choice(target, "colorimeter_response", "Tone response", ["Gamma", "sRGB"], ["gamma", "srgb"])
+        self._number(target, "colorimeter_gamma", "Gamma", 1.6, 2.6, 0.1, 1)
+        self._choice(target, "colorimeter_mode", "Profiling detail",
+                     ["Quick · matrix ICC", "Detailed · 729 patches, LUT ICC"], ["quick", "detailed"])
+        automation = self._group(colorimeter, "Automation")
+        self._switch(automation, "colorimeter_auto_ddc", "Adjust monitor controls automatically",
+                     "Use verified brightness and RGB gain controls where available; otherwise guide manual setup.")
+        self._switch(automation, "colorimeter_activate_icc", "Prefer ICC activation after calibration",
+                     "Highlight Save and activate after reviewing measurements. Requires a matching colord device.")
+
         diagnostics = self._page("Diagnostics", "dialog-information-symbolic")
         display = self._group(diagnostics, "Current display")
         if self._applier is None:
@@ -163,9 +229,17 @@ class SettingsWindow(Adw.PreferencesWindow):
         self._reset_button.connect("clicked", self._confirm_reset)
         reset.add(self._reset_button)
 
-    def _change(self, key: str, value: str | bool | None) -> None:
+    def _change(self, key: str, value) -> None:
         if not self._updating:
-            self._persist(replace(self._settings, **{key: value}))
+            try:
+                settings = replace(self._settings, **{key: value})
+            except (ValueError, TypeError) as error:
+                self._rebuild()
+                dialog = Adw.AlertDialog(heading="Invalid preference", body=str(error))
+                dialog.add_response("close", "Close")
+                dialog.present(self)
+                return
+            self._persist(settings)
 
     def _persist(self, settings: Settings) -> None:
         try:
@@ -210,3 +284,11 @@ def settings_button() -> Gtk.Button:
     """A shared header-bar entry point for settings."""
     return Gtk.Button(icon_name="emblem-system-symbolic", tooltip_text="Settings",
                       action_name="app.settings")
+
+
+def main_menu_button() -> Gtk.MenuButton:
+    """Shared application menu for calibration and day-to-day controls."""
+    menu = Gio.Menu()
+    menu.append("Colorimeter…", "app.colorimeter")
+    menu.append("Settings", "app.settings")
+    return Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text="Main menu")

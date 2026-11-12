@@ -69,11 +69,22 @@ preference again whenever the display wakes. Startup preferences apply
 when the service next starts. Explicit `lumenctl apply-default` still works
 when automatic application at login is disabled.
 
+## Colorimeter calibration
+
+Choose **Main menu → Colorimeter…** for instrument-guided X11 SDR calibration.
+Install ArgyllCMS for measurement and optional colord/dbus-python for ICC
+activation. Quick mode produces a matrix ICC; Detailed mode measures 729
+profiling patches and produces a LUT ICC. Both independently verify the
+result, support manual setup without DDC, and save exact measured curves.
+Targets and instrument defaults are under **Settings → Colorimeter**.
+See the [setup and workflow guide](docs/colorimeter.md).
+
 ## Privileges
 
-None needed. Lumen talks to the `ddccontrol` D-Bus service, whose policy
+Monitor control needs no elevated privileges. Lumen talks to the `ddccontrol` D-Bus service, whose policy
 allows any user to read and write display controls. There is no `sudo`
-step, no `udev` rule and no system-wide change.
+step for DDC control. Optional USB colorimeters may need the distribution’s
+Argyll instrument udev rules.
 
 ## Applying a calibration at login
 

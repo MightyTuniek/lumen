@@ -31,20 +31,14 @@ def active_profile_path():
 
 def build_applier() -> ProfileApplier:
     """The applier for the first monitor the backends can reach."""
-    backend = make_ddc_backend()
-    monitors = backend.list_monitors()
-    if not monitors:
-        raise RuntimeError("no monitors were found")
-    monitor = monitors[0]
-    if hasattr(backend, "describe"):
-        monitor = backend.describe(monitor)
-    capabilities = backend.capabilities(monitor)
-    gamma = make_gamma_backend()
-    output = None
-    if gamma is not None:
-        outputs = gamma.list_outputs()
-        output = outputs[0] if outputs else None
-    return ProfileApplier(backend, monitor, capabilities, gamma, output)
+    from lumen.backends.displays import applier_for_profile, discover_displays
+    path = active_profile_path()
+    if path is not None:
+        return applier_for_profile(load_profile(path))
+    choices, _ = discover_displays()
+    if not choices:
+        raise RuntimeError("No display could be reached")
+    return choices[0].applier()
 
 
 def apply_active_profile(applier: ProfileApplier | None = None) -> list[str]:
@@ -52,9 +46,20 @@ def apply_active_profile(applier: ProfileApplier | None = None) -> list[str]:
     path = active_profile_path()
     if path is None:
         return ["no saved calibration to apply"]
-    applier = applier or build_applier()
     profile = load_profile(path)
-    return applier.apply(profile)
+    if profile.measured_curves is not None:
+        from lumen.backends.displays import applier_for_profile
+        applier = applier_for_profile(profile)
+    else:
+        applier = applier or build_applier()
+    from lumen.backends.locking import DisplayBusy
+    try:
+        if profile.measured_curves is not None:
+            from lumen.backends.displays import apply_saved_profile
+            return apply_saved_profile(profile, applier)
+        return applier.apply(profile)
+    except DisplayBusy:
+        return ["Skipped profile application: this display is being calibrated"]
 
 
 def watch_display_wake(applier: ProfileApplier, interval: float = 5.0) -> None:

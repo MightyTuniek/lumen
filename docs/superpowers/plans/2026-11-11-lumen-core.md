@@ -19,7 +19,7 @@
 - Every gamma write must be followed by an explicit flush and a read-back verification. (Spec §2.4.1 — the write is silently discarded otherwise.)
 - Controls are classified `safe`, `confirm` or `dangerous`. `dangerous` controls are never exposed by the normal UI path.
 - The VCP registry is authored from the public MCCS/DDC-CI specification. No GPL source (ddcutil) may be copied.
-- The project is MIT licensed.
+- The project is GPL-3.0-only licensed.
 - The application writes nothing outside the user's home directory (XDG config dir only).
 - Identifiers use lowercase_with_underscores. No abbreviations that are not in the MCCS specification.
 
@@ -186,7 +186,7 @@ name = "lumen"
 version = "0.1.0"
 description = "Guided display calibration"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = { text = "GPL-3.0-only" }
 dependencies = []
 
 [project.optional-dependencies]
@@ -4879,7 +4879,7 @@ git commit -m "test: read-only integration checks against real hardware"
 
 **Interfaces:**
 - Consumes: the whole project.
-- Produces: a README that states what the tool does and how to run it; an MIT licence; an architecture note explaining the layering rule that keeps the core portable; and packaging metadata with the console script entry point.
+- Produces: a README that states what the tool does and how to run it; a GPL version 3 licence; an architecture note explaining the layering rule that keeps the core portable; and packaging metadata with the console script entry point.
 
 - [ ] **Step 1: Write the README**
 
@@ -4938,36 +4938,14 @@ only and says so.
 
 ## Licence
 
-MIT. See `LICENSE`.
+GPL version 3 only (`GPL-3.0-only`). See `LICENSE`.
 ```
 
 - [ ] **Step 2: Write the licence**
 
-`LICENSE`:
-
-```
-MIT License
-
-Copyright (c) 2026 Lumen contributors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
+`LICENSE` must contain the complete, unmodified GNU General Public License,
+version 3, available from <https://www.gnu.org/licenses/gpl-3.0.txt>.
+Use `GPL-3.0-only` in project metadata and state version 3 only in the README.
 
 - [ ] **Step 3: Write the architecture note**
 
@@ -5048,7 +5026,7 @@ authors = [{ name = "Lumen contributors" }]
 keywords = ["display", "monitor", "calibration", "ddc", "gamma"]
 classifiers = [
     "Environment :: X11 Applications :: GTK",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3.12",
     "Topic :: System :: Hardware",
@@ -5091,7 +5069,7 @@ Expected: PASS
 
 ```bash
 cd ~/lumen && git add README.md LICENSE docs pyproject.toml
-git commit -m "docs: README, architecture note and MIT licence"
+git commit -m "docs: README, architecture note and GPL version 3 licence"
 ```
 
 ---

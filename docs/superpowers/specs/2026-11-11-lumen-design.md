@@ -229,7 +229,7 @@ Additional portability constraints:
 - **Licensing**: Lumen's VCP registry is derived from the *public MCCS
   specification*, not copied from ddcutil's GPL source. ddccontrol is
   invoked only over its documented D-Bus interface, which is an API, not a
-  code dependency. Lumen itself will be MIT-licensed.
+  code dependency. Lumen itself is GPL-3.0-only licensed.
 
 ---
 
@@ -690,7 +690,7 @@ To keep that door open, the UI layer talks to the engine only through the
 
 ### 10.4 Licensing and provenance
 
-- **MIT licensed**, with a `LICENSE` file.
+- **GPL-3.0-only licensed**, with a `LICENSE` file.
 - The **VCP registry** is authored from the public MCCS/DDC-CI
   specification, citing it in the source. ddcutil's GPL source is *not*
   copied; its table was used as a cross-check during design only.

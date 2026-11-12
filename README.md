@@ -120,4 +120,7 @@ only and says so.
 
 ## Licence
 
-MIT. See `LICENSE`.
+Copyright (c) 2026 Lumen contributors.
+
+Licensed under the GNU General Public License, version 3 only
+(`GPL-3.0-only`). See [LICENSE](LICENSE) for the full terms.

@@ -17,6 +17,7 @@ import math
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
+from lumen.backends.locking import display_lock
 from lumen.backends.base import DdcBackend, DdcError, GammaBackend, GammaError
 from lumen.model.capability import supported_specs
 from lumen.model.monitor import Capabilities, MonitorDescriptor
@@ -149,7 +150,8 @@ class VcpControl:
                 f"{self.label} must be between {int(self.minimum)} and "
                 f"{int(self.maximum)}, not {target}"
             )
-        self._backend.set(self._monitor, self._spec.code, target)
+        with display_lock(None, self._monitor.identifier):
+            self._backend.set(self._monitor, self._spec.code, target)
         self._cached_value = float(target)
 
 
@@ -207,7 +209,8 @@ class PresetControl:
             raise DdcError(
                 f"{self.label} must be one of {allowed}, not 0x{target:02X}"
             )
-        self._backend.set(self._monitor, self._spec.code, target)
+        with display_lock(None, self._monitor.identifier):
+            self._backend.set(self._monitor, self._spec.code, target)
         self._cached_value = float(target)
 
 
@@ -292,12 +295,10 @@ class GammaControl:
             fraction = position / (size - 1) if size > 1 else 0.0
             target[position] = int(round(65535 * (fraction ** (1.0 / value))))
         channels[self._index()] = target
-        self._backend.write_ramp(
-            self._output,
-            tuple(channels[0]),
-            tuple(channels[1]),
-            tuple(channels[2]),
-        )
+        with display_lock(self._output):
+            self._backend.write_ramp(
+                self._output, tuple(channels[0]), tuple(channels[1]), tuple(channels[2]),
+            )
         self._cached_value = value
 
 

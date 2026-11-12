@@ -107,3 +107,26 @@ def test_wake_respects_current_preferences(tmp_path, monkeypatch, enabled):
     with pytest.raises(KeyboardInterrupt):
         daemon.watch_display_wake(applier)
     assert applied == ([applier] if enabled else [])
+
+
+def test_service_skips_a_display_while_calibration_holds_its_lock(monkeypatch, tmp_path):
+    import threading
+    from lumen.backends.locking import display_lock
+
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+    save_profile(new_profile('Default', MONITOR, ddc={0x10: 77}))
+    applier, backend = make_applier()
+    ready, release = threading.Event(), threading.Event()
+    def calibrating():
+        with display_lock(None, MONITOR.identifier):
+            ready.set()
+            release.wait(5)
+    worker = threading.Thread(target=calibrating)
+    worker.start()
+    try:
+        assert ready.wait(2)
+        assert 'being calibrated' in apply_active_profile(applier)[0]
+        assert backend.get(MONITOR, 0x10).value == 40
+    finally:
+        release.set()
+        worker.join()

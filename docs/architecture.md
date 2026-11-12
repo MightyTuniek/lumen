@@ -75,3 +75,36 @@ Three groups of VCP codes can disrupt the display and are classified
 
 They are never written, whatever a profile asks for, and they are never
 offered in the normal control list.
+
+## Measured calibration
+
+The visual wizard remains a human-judgment path. The separate colorimeter
+session uses instrument XYZ measurements, bounded DDC brightness/gain
+optimization, ArgyllCMS iterative LUT calibration, optional detailed ICC
+profiling, and an independent verification chart. It never automatically
+adjusts contrast, hardware black levels, presets, hue, or saturation.
+
+The model contains portable targets, readings, display identity, and
+sampled curves. The engine orchestrates an injectable measurement adapter,
+controls, and an optional ICC installer. Argyll processes, terminal I/O,
+X11 output discovery/properties, advisory locks, and colord D-Bus calls
+belong to backends. GTK widgets and instrument prompts stay in the UI.
+
+Measured profiles add optional sampled curves, display targets, ICC asset
+references, and verification metadata. Legacy profiles retain exponent
+curves. Measured samples take precedence and are interpolated to the actual
+ramp length; they replace the ramp absolutely. Both green and blue are
+verified along with red. Display identity is resolved before applying a
+measured profile, including in the service and CLI.
+
+A colorimeter transaction owns output and monitor locks from capture
+through review/commit or rollback. It snapshots only the hardware controls
+it may adjust, all RGB ramps, and the ICC association/properties. Instrument
+access is checked before display writes. Cancellation terminates child
+processes before rollback; failed restoration is reported. colord profiling
+inhibition and GTK sleep inhibition are released on exit. Save-only restores
+the original display state; successful activation keeps the measured state.
+Manual monitor-menu changes cannot be restored through unavailable DDC.
+
+See [Colorimeter calibration](colorimeter.md) for dependency, file lifecycle,
+profile ownership, and hardware-validation details.

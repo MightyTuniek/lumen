@@ -27,7 +27,7 @@ from .widgets import (  # noqa: E402
     PatternArea,
     read_controls,
 )
-from .settings import settings_button  # noqa: E402
+from .settings import main_menu_button, settings_button  # noqa: E402
 
 
 class WizardWindow(Adw.ApplicationWindow):
@@ -55,6 +55,7 @@ class WizardWindow(Adw.ApplicationWindow):
 
         self._header = Adw.HeaderBar()
         self._header.pack_end(settings_button())
+        self._header.pack_end(main_menu_button())
         self._header.set_title_widget(
             Adw.WindowTitle(title="Calibration", subtitle="")
         )

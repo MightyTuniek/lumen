@@ -90,7 +90,9 @@ def _cmd_set(args) -> int:
             file=sys.stderr,
         )
         return 1
-    backend.set(monitor, code, args.value)
+    from lumen.backends.locking import display_lock
+    with display_lock(None, monitor.identifier):
+        backend.set(monitor, code, args.value)
     print(f"0x{code:02X} = {args.value}")
     return 0
 
@@ -129,14 +131,23 @@ def _cmd_profiles(args) -> int:
             print(f"No profile called {args.name!r}.", file=sys.stderr)
             return 1
         profile = load_profile(path)
-        applier, monitor = _applier()
+        if profile.measured_curves is not None:
+            from lumen.backends.displays import applier_for_profile
+            applier = applier_for_profile(profile)
+            monitor = applier.monitor
+        else:
+            applier, monitor = _applier()
         if not profile_matches_monitor(profile, monitor):
             print(
                 f"Warning: this profile was made for a different monitor "
                 f"({profile.monitor.model or 'unknown'}).",
                 file=sys.stderr,
             )
-        notes = applier.apply(profile)
+        if profile.measured_curves is not None:
+            from lumen.backends.displays import apply_saved_profile
+            notes = apply_saved_profile(profile, applier)
+        else:
+            notes = applier.apply(profile)
         for note in notes:
             print(note)
         print(f"Applied {profile.name}.")
@@ -175,7 +186,11 @@ def _cmd_restore(args) -> int:
             tuple(int(value) for value in channel) for channel in raw_gamma
         )
     applier, _monitor = _applier()
-    applier.restore(Snapshot(ddc=ddc, gamma=gamma, output=payload.get("output")))
+    failures = applier.restore(Snapshot(ddc=ddc, gamma=gamma, output=payload.get("output")))
+    if failures:
+        for failure in failures:
+            print(failure, file=sys.stderr)
+        return 2
     print(f"Restored {args.path}.")
     return 0
 
@@ -198,6 +213,16 @@ def _cmd_doctor(_args) -> int:
     print("Software gamma:")
     print(f"  available: {availability.gamma}")
     print(f"  detail:    {availability.gamma_reason}")
+    from lumen.backends.colorimeter.argyll import availability as colorimeter_availability
+    tools = colorimeter_availability()
+    print("Colorimeter:")
+    print(f"  {tools.description}")
+    try:
+        from lumen.backends.colorimeter.colord import ColordBackend
+        ColordBackend()
+        print("  ICC activation: colord available")
+    except Exception as error:
+        print(f"  ICC activation: {error}")
     print("Session:")
     print(f"  type:      {os.environ.get('XDG_SESSION_TYPE', 'unknown')}")
     return 0

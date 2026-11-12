@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .profile import profile_directory
+from .colorimeter import CalibrationTarget
 
 
 @dataclass(frozen=True)
@@ -23,7 +24,36 @@ class Settings:
     reapply_on_wake: bool = True
     manage_night_light: bool = True
 
+    colorimeter_instrument: str = ""
+    colorimeter_display_type: str = ""
+    colorimeter_correction: str = ""
+    colorimeter_white_point: str = "D65"
+    colorimeter_temperature: float = 6500
+    colorimeter_luminance: float = 120
+    colorimeter_response: str = "gamma"
+    colorimeter_gamma: float = 2.2
+    colorimeter_mode: str = "quick"
+    colorimeter_auto_ddc: bool = True
+    colorimeter_activate_icc: bool = True
+
+    @property
+    def colorimeter_target(self) -> CalibrationTarget:
+        return CalibrationTarget(self.colorimeter_white_point, self.colorimeter_temperature,
+                                 self.colorimeter_luminance, self.colorimeter_response,
+                                 self.colorimeter_gamma, self.colorimeter_mode)
+
     def __post_init__(self) -> None:
+        self.colorimeter_target
+        for name in ("colorimeter_instrument", "colorimeter_display_type", "colorimeter_correction"):
+            if not isinstance(getattr(self, name), str):
+                raise ValueError(f"{name} must be text")
+        if self.colorimeter_display_type and (len(self.colorimeter_display_type) != 1
+                                              or not self.colorimeter_display_type.isascii()
+                                              or not self.colorimeter_display_type.isalnum()):
+            raise ValueError("Display type must be an instrument option")
+        if self.colorimeter_correction and Path(self.colorimeter_correction).suffix.lower() not in (".ccss", ".ccmx"):
+            raise ValueError("Correction must be a .ccss or .ccmx file")
+
         if self.appearance not in ("system", "light", "dark"):
             raise ValueError("Unknown appearance")
         if self.opening_screen not in ("wizard", "panel"):
@@ -35,7 +65,8 @@ class Settings:
                 or name in (".json", "..json") or "/" in name or "\\" in name
             ):
                 raise ValueError("Default profile must be a JSON filename")
-        for name in ("apply_at_login", "reapply_on_wake", "manage_night_light"):
+        for name in ("apply_at_login", "reapply_on_wake", "manage_night_light",
+                     "colorimeter_auto_ddc", "colorimeter_activate_icc"):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be a boolean")
 
